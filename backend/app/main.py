@@ -37,7 +37,7 @@ app.add_middleware(
     allow_origins=[
         "https://tramphim.com",
         "http://14.225.207.13:4446",
-        "https:/games.tramphim.com",
+        "https://games.tramphim.com",
         "https://api.tramphim.com",
         "http://localhost:3000",      # Game frontend (dev)
         "http://localhost:5173",      # Game frontend (Vite dev)
