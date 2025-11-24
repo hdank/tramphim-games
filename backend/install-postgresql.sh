@@ -24,9 +24,26 @@ if [ ! -f "./.env" ]; then
     exit 1
 fi
 
-# Load environment variables from .env (only lines without # comments)
-# Use grep to filter only valid lines and source them safely
-export $(grep -v '^#' ./.env | grep -v '^$' | xargs)
+# Load only DB_* variables from .env file
+# Extract DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME safely
+DB_USER=$(grep "^DB_USER" ./.env | cut -d '=' -f2 | xargs)
+DB_PASSWORD=$(grep "^DB_PASSWORD" ./.env | cut -d '=' -f2 | xargs)
+DB_HOST=$(grep "^DB_HOST" ./.env | cut -d '=' -f2 | xargs)
+DB_PORT=$(grep "^DB_PORT" ./.env | cut -d '=' -f2 | xargs)
+DB_NAME=$(grep "^DB_NAME" ./.env | cut -d '=' -f2 | xargs)
+
+# Set defaults if not found
+DB_USER=${DB_USER:-memory_game_user}
+DB_PASSWORD=${DB_PASSWORD:-password}
+DB_HOST=${DB_HOST:-localhost}
+DB_PORT=${DB_PORT:-6432}
+DB_NAME=${DB_NAME:-memory_game_db}
+
+# Validate required variables
+if [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then
+    echo -e "\033[0;31mERROR: DB_USER and DB_PASSWORD must be set in .env file!\033[0m"
+    exit 1
+fi
 
 # Color codes for output
 RED='\033[0;31m'
