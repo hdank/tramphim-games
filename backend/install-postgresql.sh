@@ -24,10 +24,9 @@ if [ ! -f "./.env" ]; then
     exit 1
 fi
 
-# Load environment variables from .env
-set -a
-source ./.env
-set +a
+# Load environment variables from .env (only lines without # comments)
+# Use grep to filter only valid lines and source them safely
+export $(grep -v '^#' ./.env | grep -v '^$' | xargs)
 
 # Color codes for output
 RED='\033[0;31m'
@@ -92,9 +91,9 @@ apt-get install -y pgbouncer
 
 # Configure PgBouncer
 echo -e "${GREEN}[6/6] Configuring PgBouncer...${NC}"
-cat > /etc/pgbouncer/pgbouncer.ini <<EOF
+cat > /etc/pgbouncer/pgbouncer.ini <<'EOF'
 [databases]
-$DB_NAME = host=127.0.0.1 port=5432 user=$DB_USER password=$DB_PASSWORD dbname=$DB_NAME
+memory_game_db = host=127.0.0.1 port=5432 user=memory_game_user password=TEMP_PASSWORD_REPLACE dbname=memory_game_db
 
 [pgbouncer]
 pool_mode = transaction
@@ -107,7 +106,7 @@ max_db_connections = 100
 max_user_connections = 100
 server_lifetime = 3600
 server_idle_timeout = 600
-listen_port = $DB_PORT
+listen_port = 6432
 listen_addr = 127.0.0.1
 logfile = /var/log/pgbouncer/pgbouncer.log
 pidfile = /var/run/pgbouncer/pgbouncer.pid
@@ -116,6 +115,11 @@ admin_users = postgres
 [console]
 admin_users = postgres
 EOF
+
+# Now replace the placeholder with actual password
+sed -i "s/TEMP_PASSWORD_REPLACE/$DB_PASSWORD/g" /etc/pgbouncer/pgbouncer.ini
+sed -i "s/memory_game_db/$DB_NAME/g" /etc/pgbouncer/pgbouncer.ini
+sed -i "s/memory_game_user/$DB_USER/g" /etc/pgbouncer/pgbouncer.ini
 
 # Create pgbouncer log directory
 mkdir -p /var/log/pgbouncer
@@ -163,5 +167,5 @@ echo "  - Max pool size: 25 connections per database"
 echo "  - Connection timeout: 600 seconds"
 echo ""
 echo "To verify PgBouncer status:"
-echo "  psql -h 127.0.0.1 -p $PGBOUNCER_PORT -U $DB_USER -d $DB_NAME"
+echo "  psql -h 127.0.0.1 -p $DB_PORT -U $DB_USER -d $DB_NAME"
 echo ""
