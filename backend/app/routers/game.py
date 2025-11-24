@@ -31,28 +31,49 @@ def calculate_time_remaining(match: models.MatchHistory) -> int | None:
     
     return int(remaining)
 
-def calculate_effective_wins(player_email: str, level_id: int, db: Session) -> int:
+def calculate_strict_consecutive_wins(player_email: str, level_id: int, db: Session) -> int:
     """
-    Calculate 'Effective Wins' for hidden difficulty.
-    Logic:
-    1. Find the most recent block of 5 consecutive losses on this level.
-    2. Count wins that occurred AFTER that block.
-    3. If no such block exists, count all wins on this level.
+    Calculate strict consecutive wins for Bonus x2.
+    Resets on ANY loss.
+    Only needs to check recent history (limit 10 is plenty for x2 logic).
     """
-    # Get all completed games for this user on this level, ordered by most recent
     games = db.query(models.MatchHistory).filter(
         models.MatchHistory.user_email == player_email,
         models.MatchHistory.level_id == level_id,
         models.MatchHistory.status.in_([models.MatchStatus.WIN, models.MatchStatus.LOSE]),
         models.MatchHistory.completed_at != None
-    ).order_by(desc(models.MatchHistory.completed_at)).all()
+    ).order_by(desc(models.MatchHistory.completed_at)).limit(10).all()
+
+    wins = 0
+    for game in games:
+        if game.status == models.MatchStatus.WIN:
+            wins += 1
+        else:
+            break
+    return wins
+
+def calculate_effective_wins(player_email: str, level_id: int, db: Session) -> int:
+    """
+    Calculate 'Effective Wins' for hidden difficulty (Flip Duration).
+    Logic:
+    1. Find the most recent block of 5 consecutive losses on this level.
+    2. Count wins that occurred AFTER that block.
+    3. If no such block exists, count all wins on this level (within limit).
+    """
+    # Get all completed games for this user on this level, ordered by most recent
+    # LIMIT to 150 to avoid scanning entire history
+    games = db.query(models.MatchHistory).filter(
+        models.MatchHistory.user_email == player_email,
+        models.MatchHistory.level_id == level_id,
+        models.MatchHistory.status.in_([models.MatchStatus.WIN, models.MatchStatus.LOSE]),
+        models.MatchHistory.completed_at != None
+    ).order_by(desc(models.MatchHistory.completed_at)).limit(150).all()
 
     if not games:
         return 0
 
     # Find the reset point (start of the last 5-loss streak)
     # We iterate backwards from most recent.
-    # If we find 5 consecutive losses, everything before that (older) is ignored.
     
     consecutive_loss_counter = 0
     reset_index = -1 # Index in 'games' list where the 5-loss streak starts (most recent of the 5)
@@ -65,24 +86,11 @@ def calculate_effective_wins(player_email: str, level_id: int, db: Session) -> i
         
         if consecutive_loss_counter >= 5:
             # Found a streak of 5 losses.
-            # The games from 0 to i (inclusive) are the "current era".
-            # Actually, if we just hit 5 losses, it means the user is currently in a "reset" state 
-            # UNLESS they have won since then.
-            # Wait, if we find 5 losses at indices k, k+1, k+2, k+3, k+4...
-            # Then any game at index < k (more recent) counts towards the new streak.
-            # So we stop looking further back.
             reset_index = i
             break
     
     # Calculate wins since the reset point
     effective_wins = 0
-    
-    # If we found a reset point, we only look at games more recent than that streak.
-    # The streak ends at games[reset_index - 4] (the 1st loss of the 5) if we view chronologically,
-    # but here 'games' is reversed (newest first).
-    # So games[0] is newest. games[reset_index] is the 5th loss (oldest of the streak).
-    # games[reset_index - 4] is the 1st loss (newest of the streak).
-    # Any game with index < (reset_index - 4) occurred AFTER the streak.
     
     limit_index = len(games)
     if reset_index != -1:
@@ -101,7 +109,7 @@ def calculate_effective_wins(player_email: str, level_id: int, db: Session) -> i
 def calculate_flip_duration(consecutive_wins: int) -> float:
     """
     Calculate flip-back duration based on consecutive wins.
-    Hidden difficulty: Activates at 2nd win (consecutive_wins >= 2)
+    Hidden difficulty: Activates at 2nd win (consecutive_wins > 1)
     - 0-1 wins: 0.6s (base)
     - 2+ wins: 0.6s + 0.2s per win (max 10 wins -> 2.4s)
     """
@@ -111,11 +119,9 @@ def calculate_flip_duration(consecutive_wins: int) -> float:
     # Cap at 10 wins for calculation as per requirement (implied "up to 10 games")
     capped_wins = min(consecutive_wins, 10)
     
-    # Each win after the first adds 0.2s
+    # Each win after the first adds 0.12s (was 0.2s in comment but 0.12 in code, keeping 0.12)
     # 2 wins: 0.6 + 0.12 = 0.72
-    # 3 wins: 0.6 + 0.24 = 0.84
     # ...
-    # 10 wins: 0.6 + 1.2 = 1.8
     difficulty_bonus = (capped_wins - 1) * 0.12
     return 0.6 + difficulty_bonus
 
@@ -142,9 +148,12 @@ def start_game(match_data: schemas.MatchCreate, db: Session = Depends(get_db)):
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
     
-    # Get effective wins to calculate difficulty
-    consecutive_wins = calculate_effective_wins(match_data.player_email, level.id, db)
-    flip_duration = calculate_flip_duration(consecutive_wins)
+    # Get effective wins to calculate difficulty (Flip Duration)
+    effective_wins = calculate_effective_wins(match_data.player_email, level.id, db)
+    flip_duration = calculate_flip_duration(effective_wins)
+    
+    # Get strict consecutive wins for Bonus calculation
+    strict_wins = calculate_strict_consecutive_wins(match_data.player_email, level.id, db)
     
     images = db.query(models.CardImage).filter(models.CardImage.is_active == True).all()
     cards = generate_cards(level.card_count, images)
@@ -158,7 +167,7 @@ def start_game(match_data: schemas.MatchCreate, db: Session = Depends(get_db)):
         moves=0,
         time_taken=0,
         flip_duration=flip_duration,
-        consecutive_wins=consecutive_wins,  # Store for later use
+        consecutive_wins=strict_wins,  # Store STRICT wins for bonus calculation
         consecutive_losses=0 # Not strictly needed with new logic but good for record
     )
     
