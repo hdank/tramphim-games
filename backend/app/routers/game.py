@@ -119,10 +119,10 @@ def calculate_flip_duration(consecutive_wins: int) -> float:
     # Cap at 10 wins for calculation as per requirement (implied "up to 10 games")
     capped_wins = min(consecutive_wins, 10)
     
-    # Each win after the first adds 0.12s (was 0.2s in comment but 0.12 in code, keeping 0.12)
+    # Each win after the first adds 0.12s
     # 2 wins: 0.6 + 0.12 = 0.72
     # ...
-    difficulty_bonus = (capped_wins - 1) * 0.12
+    difficulty_bonus = (capped_wins - 1) * 0.06
     return 0.6 + difficulty_bonus
 
 def calculate_win_bonus(consecutive_wins: int) -> int:
